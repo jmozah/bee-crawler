@@ -46,9 +46,10 @@ type Receipt struct {
 }
 
 type PushSync struct {
+	addr          swarm.Address // this node's overlay address
 	streamer      p2p.StreamerDisconnecter
 	storer        storage.Putter
-	peerSuggester topology.ClosestPeerer
+	peerSuggester topology.Driver
 	tagger        *tags.Tags
 	unwrap        func(swarm.Chunk)
 	logger        logging.Logger
@@ -60,8 +61,9 @@ type PushSync struct {
 
 var timeToWaitForReceipt = 3 * time.Second // time to wait to get a receipt for a chunk
 
-func New(streamer p2p.StreamerDisconnecter, storer storage.Putter, closestPeerer topology.ClosestPeerer, tagger *tags.Tags, unwrap func(swarm.Chunk), logger logging.Logger, accounting accounting.Interface, pricer accounting.Pricer, tracer *tracing.Tracer) *PushSync {
+func New(addr swarm.Address, streamer p2p.StreamerDisconnecter, storer storage.Putter, closestPeerer topology.Driver, tagger *tags.Tags, unwrap func(swarm.Chunk), logger logging.Logger, accounting accounting.Interface, pricer accounting.Pricer, tracer *tracing.Tracer) *PushSync {
 	ps := &PushSync{
+		addr:          addr,
 		streamer:      streamer,
 		storer:        storer,
 		peerSuggester: closestPeerer,
@@ -278,4 +280,55 @@ func (ps *PushSync) pushToClosest(ctx context.Context, ch swarm.Chunk) (rr *pb.R
 	}
 
 	return nil, topology.ErrNotFound
+}
+
+func (ps *PushSync) closestPeer(addr swarm.Address, skipPeers []swarm.Address, allowUpstream bool) (swarm.Address, error) {
+	closest := swarm.Address{}
+	err := ps.peerSuggester.EachPeerRev(func(peer swarm.Address, po uint8) (bool, bool, error) {
+		for _, a := range skipPeers {
+			if a.Equal(peer) {
+				return false, false, nil
+			}
+		}
+		if closest.IsZero() {
+			closest = peer
+			return false, false, nil
+		}
+		dcmp, err := swarm.DistanceCmp(addr.Bytes(), closest.Bytes(), peer.Bytes())
+		if err != nil {
+			return false, false, fmt.Errorf("distance compare error. addr %s closest %s peer %s: %w", addr.String(), closest.String(), peer.String(), err)
+		}
+		switch dcmp {
+		case 0:
+			// do nothing
+		case -1:
+			// current peer is closer
+			closest = peer
+		case 1:
+			// closest is already closer to chunk
+			// do nothing
+		}
+		return false, false, nil
+	})
+	if err != nil {
+		return swarm.Address{}, err
+	}
+
+	// check if found
+	if closest.IsZero() {
+		return swarm.Address{}, topology.ErrNotFound
+	}
+	if allowUpstream {
+		return closest, nil
+	}
+
+	dcmp, err := swarm.DistanceCmp(addr.Bytes(), closest.Bytes(), ps.addr.Bytes())
+	if err != nil {
+		return swarm.Address{}, fmt.Errorf("distance compare addr %s closest %s base address %s: %w", addr.String(), closest.String(), ps.addr.String(), err)
+	}
+	if dcmp != 1 {
+		return swarm.Address{}, topology.ErrNotFound
+	}
+
+	return closest, nil
 }
