@@ -12,7 +12,9 @@ package hive
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ethersphere/bee/pkg/addressbook"
@@ -37,15 +39,19 @@ type Service struct {
 	addressBook     addressbook.GetPutter
 	addPeersHandler func(context.Context, ...swarm.Address) error
 	networkID       uint64
+	batch           string
+	sqliteDB        *sql.DB
 	logger          logging.Logger
 }
 
-func New(streamer p2p.Streamer, addressbook addressbook.GetPutter, networkID uint64, logger logging.Logger) *Service {
+func New(streamer p2p.Streamer, addressbook addressbook.GetPutter, networkID uint64, batch string, sqliteDB *sql.DB, logger logging.Logger) *Service {
 	return &Service{
 		streamer:    streamer,
 		logger:      logger,
 		addressBook: addressbook,
 		networkID:   networkID,
+		batch:       batch,
+		sqliteDB:    sqliteDB,
 	}
 }
 
@@ -121,6 +127,7 @@ func (s *Service) sendPeers(ctx context.Context, peer swarm.Address, peers []swa
 }
 
 func (s *Service) peersHandler(ctx context.Context, peer p2p.Peer, stream p2p.Stream) error {
+	s.logger.Infof("getting peers list from %s",  peer.Address.String())
 	_, r := protobuf.NewWriterAndReader(stream)
 	ctx, cancel := context.WithTimeout(ctx, messageTimeout)
 	defer cancel()
@@ -150,6 +157,8 @@ func (s *Service) peersHandler(ctx context.Context, peer p2p.Peer, stream p2p.St
 		}
 
 		peers = append(peers, bzzAddress.Overlay)
+		s.logger.Infof("got %s from %s", swarm.NewAddress(newPeer.Overlay).String(),  peer.Address.String())
+		s.addPeer(peer.Address.String(), bzzAddress.Overlay.String(), bzzAddress.Underlay.String())
 	}
 
 	if s.addPeersHandler != nil {
@@ -157,6 +166,41 @@ func (s *Service) peersHandler(ctx context.Context, peer p2p.Peer, stream p2p.St
 			return err
 		}
 	}
+	s.updatePeerCount(peer.Address.String(), len(peers))
 
 	return nil
+}
+
+func (s *Service) addPeer(baseOverlay string, neighbourOverlay string, neighbourUnderlay string) {
+	insertStatement := `insert into NEIGHBOUR_INFO (BATCH, BASE_OVERLAY, NEIGHBOUR_OVERLAY, NEIGHBOUR_IP4or6, NEIGHBOUR_IP, NEIGHBOUR_PROTOCOL, NEIGHBOUR_PORT, NEIGHBOUR_UNDERLAY) values (?, ?, ?, ?, ?, ?, ?, ?)`
+	statement, err := s.sqliteDB.Prepare(insertStatement)
+	if err != nil {
+		s.logger.Error(err.Error())
+		return
+	}
+
+	cols := strings.Split(neighbourUnderlay, "/")
+	if len(cols) != 7 {
+		s.logger.Errorf("underlay split is not proper %s", neighbourUnderlay)
+		return
+	}
+
+	_, err = statement.Exec(s.batch, baseOverlay, neighbourOverlay, cols[1], cols[2], cols[3], cols[4], cols[6])
+	if err != nil {
+		s.logger.Error(err.Error())
+	}
+}
+
+func (s *Service) updatePeerCount(baseOverlay string, count int) {
+	insertStatement := `update PEER_INFO set PEERS_COUNT = PEERS_COUNT + ? WHERE BATCH = ? and OVERLAY = ?`
+	statement, err := s.sqliteDB.Prepare(insertStatement)
+	if err != nil {
+		s.logger.Error(err.Error())
+		return
+	}
+
+	_, err = statement.Exec(count, s.batch, baseOverlay)
+	if err != nil {
+		s.logger.Error(err.Error())
+	}
 }

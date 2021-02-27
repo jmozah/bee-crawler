@@ -7,6 +7,7 @@ package libp2p
 import (
 	"context"
 	"crypto/ecdsa"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net"
@@ -64,7 +65,8 @@ type Service struct {
 	notifier          p2p.Notifier
 	logger            logging.Logger
 	tracer            *tracing.Tracer
-
+	sqliteDB          *sql.DB
+	batch             string
 	protocolsmu sync.RWMutex
 }
 
@@ -76,6 +78,8 @@ type Options struct {
 	Standalone     bool
 	LightNode      bool
 	WelcomeMessage string
+	Batch          string
+	SQLiteDB       *sql.DB
 }
 
 func New(ctx context.Context, signer beecrypto.Signer, networkID uint64, overlay swarm.Address, addr string, ab addressbook.Putter, storer storage.StateStorer, logger logging.Logger, tracer *tracing.Tracer, o Options) (*Service, error) {
@@ -221,6 +225,8 @@ func New(ctx context.Context, signer beecrypto.Signer, networkID uint64, overlay
 		blocklist:         blocklist.NewBlocklist(storer),
 		logger:            logger,
 		tracer:            tracer,
+		sqliteDB:          o.SQLiteDB,
+		batch:             o.Batch,
 		connectionBreaker: breaker.NewBreaker(breaker.Options{}), // use default options
 	}
 
@@ -357,16 +363,7 @@ func (s *Service) AddProtocol(p p2p.ProtocolSpec) (err error) {
 			s.peers.addStream(peerID, streamlibp2p, cancel)
 			defer s.peers.removeStream(peerID, streamlibp2p)
 
-			// tracing: get span tracing context and add it to the context
-			// silently ignore if the peer is not providing tracing
-			ctx, err := s.tracer.WithContextFromHeaders(ctx, stream.Headers())
-			if err != nil && !errors.Is(err, tracing.ErrContextNotFound) {
-				s.logger.Debugf("handle protocol %s/%s: stream %s: peer %s: get tracing context: %v", p.Name, p.Version, ss.Name, overlay, err)
-				_ = stream.Reset()
-				return
-			}
-
-			logger := tracing.NewLoggerWithTraceID(ctx, s.logger)
+			logger := s.logger
 
 			s.metrics.HandledStreamCount.Inc()
 			if err := ss.Handler(ctx, p2p.Peer{Address: overlay}, stream); err != nil {
@@ -489,20 +486,6 @@ func (s *Service) Connect(ctx context.Context, addr ma.Multiaddr) (address *bzz.
 		return nil, fmt.Errorf("handshake: %w", err)
 	}
 
-	blocked, err := s.blocklist.Exists(i.BzzAddress.Overlay)
-	if err != nil {
-		s.logger.Debugf("blocklisting: exists %s: %v", info.ID, err)
-		s.logger.Errorf("internal error while connecting with peer %s", info.ID)
-		_ = s.host.Network().ClosePeer(info.ID)
-		return nil, fmt.Errorf("peer blocklisted")
-	}
-
-	if blocked {
-		s.logger.Errorf("blocked connection from blocklisted peer %s", info.ID)
-		_ = s.host.Network().ClosePeer(info.ID)
-		return nil, fmt.Errorf("peer blocklisted")
-	}
-
 	if exists := s.peers.addIfNotExists(stream.Conn(), i.BzzAddress.Overlay); exists {
 		if err := handshakeStream.FullClose(); err != nil {
 			_ = s.Disconnect(i.BzzAddress.Overlay)
@@ -534,10 +517,29 @@ func (s *Service) Connect(ctx context.Context, addr ma.Multiaddr) (address *bzz.
 
 	s.protocolsmu.RUnlock()
 
+	s.addPeerToDB(i.BzzAddress)
 	s.metrics.CreatedConnectionCount.Inc()
 	s.logger.Debugf("successfully connected to peer %s (outbound)", i.BzzAddress.ShortString())
 	s.logger.Infof("successfully connected to peer %s (outbound)", i.BzzAddress.Overlay)
 	return i.BzzAddress, nil
+}
+
+func (s *Service) addPeerToDB(bzzAddress *bzz.Address)  {
+	// insert the connected peer in to DB
+	insertStatement := `insert into PEER_INFO (BATCH, OVERLAY, UNDERLAY, PEERS_COUNT) values (?, ?, ?, ?)`
+	statement, err := s.sqliteDB.Prepare(insertStatement)
+	if err != nil {
+		s.logger.Error(err.Error())
+		return
+	}
+
+	peers_count := 0
+	overlay := bzzAddress.Overlay.String()
+	underlay := bzzAddress.Underlay.String()
+	_, err = statement.Exec(s.batch, overlay, underlay, peers_count)
+	if err != nil {
+		s.logger.Error(err.Error())
+	}
 }
 
 func (s *Service) Disconnect(overlay swarm.Address) error {

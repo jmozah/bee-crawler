@@ -121,6 +121,7 @@ Welcome to the Swarm.... Bzzz Bzzzz Bzzzz
 
 			b, err := node.NewBee(c.config.GetString(optionNameP2PAddr), signerConfig.address, *signerConfig.publicKey, signerConfig.signer, c.config.GetUint64(optionNameNetworkID), logger, signerConfig.libp2pPrivateKey, signerConfig.pssPrivateKey, node.Options{
 				DataDir:                c.config.GetString(optionNameDataDir),
+				DBFile:                 c.config.GetString(optionNameDataBaseFile),
 				DBCapacity:             c.config.GetUint64(optionNameDBCapacity),
 				APIAddr:                c.config.GetString(optionNameAPIAddr),
 				DebugAPIAddr:           debugAPIAddr,

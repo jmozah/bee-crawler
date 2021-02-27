@@ -33,7 +33,7 @@ var (
 	errOverlayMismatch         = errors.New("overlay mismatch")
 	timeToRetry                = 60 * time.Second
 	shortRetry                 = 30 * time.Second
-	saturationPeers            = 4
+	saturationPeers            = 100000
 )
 
 type binSaturationFunc func(bin uint8, peers, connected *pslice.PSlice) bool
@@ -121,7 +121,7 @@ func (k *Kad) manage() {
 		select {
 		case <-k.quit:
 			return
-		case <-time.After(30 * time.Second):
+		case <-time.After(5 * time.Second):
 			// periodically try to connect to new peers
 			select {
 			case k.manageC <- struct{}{}:
@@ -387,7 +387,8 @@ func (k *Kad) connect(ctx context.Context, peer swarm.Address, ma ma.Multiaddr, 
 		return errOverlayMismatch
 	}
 
-	return k.announce(ctx, peer)
+	k.logger.Infof("successfully connected to peer %s", peer)
+	return nil
 }
 
 // announce a newly connected peer to our connected peers, but also
@@ -466,10 +467,6 @@ func (k *Kad) Connected(ctx context.Context, peer p2p.Peer) error {
 }
 
 func (k *Kad) connected(ctx context.Context, addr swarm.Address) error {
-	if err := k.announce(ctx, addr); err != nil {
-		return err
-	}
-
 	po := swarm.Proximity(k.base.Bytes(), addr.Bytes())
 	k.knownPeers.Add(addr, po)
 	k.connectedPeers.Add(addr, po)
@@ -477,12 +474,6 @@ func (k *Kad) connected(ctx context.Context, addr swarm.Address) error {
 	k.waitNextMu.Lock()
 	delete(k.waitNext, addr.String())
 	k.waitNextMu.Unlock()
-
-	k.depthMu.Lock()
-	k.depth = recalcDepth(k.connectedPeers)
-	k.depthMu.Unlock()
-
-	k.notifyPeerSig()
 
 	return nil
 }

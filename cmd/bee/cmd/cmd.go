@@ -21,6 +21,7 @@ const (
 	optionNameDBCapacity           = "db-capacity"
 	optionNamePassword             = "password"
 	optionNamePasswordFile         = "password-file"
+	optionNameDataBaseFile         = "database-file"
 	optionNameAPIAddr              = "api-addr"
 	optionNameP2PAddr              = "p2p-addr"
 	optionNameNATAddr              = "nat-addr"
@@ -176,9 +177,10 @@ func (c *command) setHomeDir() (err error) {
 }
 
 func (c *command) setAllFlags(cmd *cobra.Command) {
-	cmd.Flags().String(optionNameDataDir, filepath.Join(c.homeDir, ".bee"), "data directory")
+	cmd.Flags().String(optionNameDataDir, filepath.Join(c.homeDir, ".crawler"), "data directory")
 	cmd.Flags().Uint64(optionNameDBCapacity, 5000000, fmt.Sprintf("db capacity in chunks, multiply by %d to get approximate capacity in bytes", swarm.ChunkSize))
 	cmd.Flags().String(optionNamePassword, "", "password for decrypting keys")
+	cmd.Flags().String(optionNameDataBaseFile, filepath.Join(c.homeDir, ".crawler/beenodeslive.db"), "path to a sqlite database that contains peer connection information")
 	cmd.Flags().String(optionNamePasswordFile, "", "path to a file that contains password for decrypting keys")
 	cmd.Flags().String(optionNameAPIAddr, ":1633", "HTTP API listen address")
 	cmd.Flags().String(optionNameP2PAddr, ":1634", "P2P listen address")
