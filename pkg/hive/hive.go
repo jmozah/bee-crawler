@@ -39,18 +39,16 @@ type Service struct {
 	addressBook     addressbook.GetPutter
 	addPeersHandler func(context.Context, ...swarm.Address) error
 	networkID       uint64
-	batch           string
 	sqliteDB        *sql.DB
 	logger          logging.Logger
 }
 
-func New(streamer p2p.Streamer, addressbook addressbook.GetPutter, networkID uint64, batch string, sqliteDB *sql.DB, logger logging.Logger) *Service {
+func New(streamer p2p.Streamer, addressbook addressbook.GetPutter, networkID uint64, sqliteDB *sql.DB, logger logging.Logger) *Service {
 	return &Service{
 		streamer:    streamer,
 		logger:      logger,
 		addressBook: addressbook,
 		networkID:   networkID,
-		batch:       batch,
 		sqliteDB:    sqliteDB,
 	}
 }

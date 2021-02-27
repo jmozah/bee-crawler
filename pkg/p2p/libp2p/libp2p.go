@@ -66,7 +66,6 @@ type Service struct {
 	logger            logging.Logger
 	tracer            *tracing.Tracer
 	sqliteDB          *sql.DB
-	batch             string
 	protocolsmu sync.RWMutex
 }
 
@@ -78,7 +77,6 @@ type Options struct {
 	Standalone     bool
 	LightNode      bool
 	WelcomeMessage string
-	Batch          string
 	SQLiteDB       *sql.DB
 }
 
@@ -226,7 +224,6 @@ func New(ctx context.Context, signer beecrypto.Signer, networkID uint64, overlay
 		logger:            logger,
 		tracer:            tracer,
 		sqliteDB:          o.SQLiteDB,
-		batch:             o.Batch,
 		connectionBreaker: breaker.NewBreaker(breaker.Options{}), // use default options
 	}
 
@@ -578,6 +575,7 @@ func (s *Service) Disconnect(overlay swarm.Address) error {
 
 func (s *Service) removePeerFromDB(overlayToDelete swarm.Address)  error {
 	// deleet from peer_info connection table to indicate tht this is disconnected
+	s.logger.Infof("deleting the record from PEER_INFO for %s", overlayToDelete)
 	deleteStatement := `delete from PEER_INFO where OVERLAY = ?`
 	statement, err := s.sqliteDB.Prepare(deleteStatement)
 	if err != nil {
@@ -590,6 +588,7 @@ func (s *Service) removePeerFromDB(overlayToDelete swarm.Address)  error {
 	}
 
 	// delete the neighbour info of the base overlay
+	s.logger.Infof("deleting all records where  BASE_OVERLAY = %s", overlayToDelete)
 	deleteStatement = `delete from NEIGHBOUR_INFO where BASE_OVERLAY = ?`
 	statement, err = s.sqliteDB.Prepare(deleteStatement)
 	if err != nil {
@@ -623,6 +622,7 @@ func (s *Service) removePeerFromDB(overlayToDelete swarm.Address)  error {
 		if err != nil {
 			return err
 		}
+		s.logger.Infof("reducing peer count of %s", overlayToUpdate)
 
 	}
 	err = rows.Close()
@@ -632,6 +632,7 @@ func (s *Service) removePeerFromDB(overlayToDelete swarm.Address)  error {
 
 
 	// delete the neighbour info where the neighbour overlay is the disconnected peer
+	s.logger.Infof("deleting all records where  NEIGHBOUR_OVERLAY = %s", overlayToDelete)
 	deleteStatement = `delete from NEIGHBOUR_INFO where NEIGHBOUR_OVERLAY = ?`
 	statement, err = s.sqliteDB.Prepare(deleteStatement)
 	if err != nil {

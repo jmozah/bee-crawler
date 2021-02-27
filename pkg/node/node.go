@@ -101,8 +101,6 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 	addressbook := addressbook.New(stateStore)
 
 	t := time.Now()
-	batch := t.Format("2006-01-02-15")
-	logger.Debugf("batch is %s", batch)
 	p2ps, err := libp2p.New(p2pCtx, signer, networkID, swarmAddress, addr, addressbook, stateStore, logger, nil, libp2p.Options{
 		PrivateKey:     libp2pPrivateKey,
 		NATAddr:        o.NATAddr,
@@ -111,7 +109,6 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 		Standalone:     o.Standalone,
 		WelcomeMessage: o.WelcomeMessage,
 		SQLiteDB:        sqliteDB,
-		Batch:           batch,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("p2p service: %w", err)
@@ -136,7 +133,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 
 	// Construct protocols.
 
-	hive := hive.New(p2ps, addressbook, networkID, batch, sqliteDB, logger)
+	hive := hive.New(p2ps, addressbook, networkID, sqliteDB, logger)
 	if err = p2ps.AddProtocol(hive.Protocol()); err != nil {
 		return nil, fmt.Errorf("hive service: %w", err)
 	}
