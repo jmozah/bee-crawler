@@ -143,6 +143,7 @@ func (s *Service) peersHandler(ctx context.Context, peer p2p.Peer, stream p2p.St
 	go stream.FullClose()
 
 	var peers []swarm.Address
+	count := 0
 	for _, newPeer := range peersReq.Peers {
 		bzzAddress, err := bzz.ParseAddress(newPeer.Underlay, newPeer.Overlay, newPeer.Signature, s.networkID)
 		if err != nil {
@@ -158,7 +159,11 @@ func (s *Service) peersHandler(ctx context.Context, peer p2p.Peer, stream p2p.St
 
 		peers = append(peers, bzzAddress.Overlay)
 		s.logger.Infof("got %s from %s", swarm.NewAddress(newPeer.Overlay).String(),  peer.Address.String())
-		s.addPeer(peer.Address.String(), bzzAddress.Overlay.String(), bzzAddress.Underlay.String())
+		err = s.addPeer(peer.Address, bzzAddress.Overlay, bzzAddress.Underlay.String())
+		if err != nil {
+			continue
+		}
+		count ++
 	}
 
 	if s.addPeersHandler != nil {
@@ -166,40 +171,44 @@ func (s *Service) peersHandler(ctx context.Context, peer p2p.Peer, stream p2p.St
 			return err
 		}
 	}
-	s.updatePeerCount(peer.Address.String(), len(peers))
+	s.updatePeerCount(peer.Address.String(), count)
 
 	return nil
 }
 
-func (s *Service) addPeer(baseOverlay string, neighbourOverlay string, neighbourUnderlay string) {
-	insertStatement := `insert into NEIGHBOUR_INFO (BATCH, BASE_OVERLAY, NEIGHBOUR_OVERLAY, NEIGHBOUR_IP4or6, NEIGHBOUR_IP, NEIGHBOUR_PROTOCOL, NEIGHBOUR_PORT, NEIGHBOUR_UNDERLAY) values (?, ?, ?, ?, ?, ?, ?, ?)`
+func (s *Service) addPeer(baseOverlay swarm.Address, neighbourOverlay swarm.Address, neighbourUnderlay string) error {
+	insertStatement := `insert into NEIGHBOUR_INFO (BASE_OVERLAY, PROXIMITY_ORDER,  NEIGHBOUR_OVERLAY, NEIGHBOUR_IP4or6, NEIGHBOUR_IP, NEIGHBOUR_PROTOCOL, NEIGHBOUR_PORT, NEIGHBOUR_UNDERLAY) values (?, ?, ?, ?, ?, ?, ?, ?)`
 	statement, err := s.sqliteDB.Prepare(insertStatement)
 	if err != nil {
 		s.logger.Error(err.Error())
-		return
+		return err
 	}
 
 	cols := strings.Split(neighbourUnderlay, "/")
 	if len(cols) != 7 {
 		s.logger.Errorf("underlay split is not proper %s", neighbourUnderlay)
-		return
+		return err
 	}
 
-	_, err = statement.Exec(s.batch, baseOverlay, neighbourOverlay, cols[1], cols[2], cols[3], cols[4], cols[6])
+	po := swarm.Proximity(baseOverlay.Bytes(), neighbourOverlay.Bytes())
+
+	_, err = statement.Exec(baseOverlay.String(), po, neighbourOverlay.String(), cols[1], cols[2], cols[3], cols[4], cols[6])
 	if err != nil {
 		s.logger.Error(err.Error())
+		return err
 	}
+	return nil
 }
 
 func (s *Service) updatePeerCount(baseOverlay string, count int) {
-	insertStatement := `update PEER_INFO set PEERS_COUNT = PEERS_COUNT + ? WHERE BATCH = ? and OVERLAY = ?`
-	statement, err := s.sqliteDB.Prepare(insertStatement)
+	updateStatement := `update PEER_INFO set PEERS_COUNT = PEERS_COUNT + ? WHERE OVERLAY = ?`
+	statement, err := s.sqliteDB.Prepare(updateStatement)
 	if err != nil {
 		s.logger.Error(err.Error())
 		return
 	}
 
-	_, err = statement.Exec(count, s.batch, baseOverlay)
+	_, err = statement.Exec(count, baseOverlay)
 	if err != nil {
 		s.logger.Error(err.Error())
 	}

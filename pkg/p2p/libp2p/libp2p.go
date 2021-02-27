@@ -526,7 +526,7 @@ func (s *Service) Connect(ctx context.Context, addr ma.Multiaddr) (address *bzz.
 
 func (s *Service) addPeerToDB(bzzAddress *bzz.Address)  {
 	// insert the connected peer in to DB
-	insertStatement := `insert into PEER_INFO (BATCH, OVERLAY, UNDERLAY, PEERS_COUNT) values (?, ?, ?, ?)`
+	insertStatement := `insert into PEER_INFO (OVERLAY, UNDERLAY, PEERS_COUNT) values (?, ?, ?)`
 	statement, err := s.sqliteDB.Prepare(insertStatement)
 	if err != nil {
 		s.logger.Error(err.Error())
@@ -536,7 +536,7 @@ func (s *Service) addPeerToDB(bzzAddress *bzz.Address)  {
 	peers_count := 0
 	overlay := bzzAddress.Overlay.String()
 	underlay := bzzAddress.Underlay.String()
-	_, err = statement.Exec(s.batch, overlay, underlay, peers_count)
+	_, err = statement.Exec(overlay, underlay, peers_count)
 	if err != nil {
 		s.logger.Error(err.Error())
 	}
@@ -567,8 +567,84 @@ func (s *Service) Disconnect(overlay swarm.Address) error {
 		s.notifier.Disconnected(peer)
 	}
 
+	err := s.removePeerFromDB(overlay)
+	if err != nil{
+		s.logger.Error(err.Error())
+		return err
+	}
+
 	return nil
 }
+
+func (s *Service) removePeerFromDB(overlayToDelete swarm.Address)  error {
+	// deleet from peer_info connection table to indicate tht this is disconnected
+	deleteStatement := `delete from PEER_INFO where OVERLAY = ?`
+	statement, err := s.sqliteDB.Prepare(deleteStatement)
+	if err != nil {
+		return err
+	}
+
+	_, err = statement.Exec(overlayToDelete)
+	if err != nil {
+		return err
+	}
+
+	// delete the neighbour info of the base overlay
+	deleteStatement = `delete from NEIGHBOUR_INFO where BASE_OVERLAY = ?`
+	statement, err = s.sqliteDB.Prepare(deleteStatement)
+	if err != nil {
+		return err
+	}
+
+	_, err = statement.Exec(overlayToDelete)
+	if err != nil {
+		return err
+	}
+
+
+	// select all the rows where neighbour overlay is the disconnected overlay and rmove them
+	rows, err := s.sqliteDB.Query("select BASE_OVERLAY from NEIGHBOUR_INFO WHERE NEIGHBOUR_OVERLAY = '%s' \n", overlayToDelete)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		overlayToUpdate := ""
+		err := rows.Scan(&overlayToUpdate)
+		if err != nil {
+			return err
+		}
+		updateStatement := `update PEER_INFO set PEERS_COUNT = PEERS_COUNT - 1 WHERE OVERLAY = ?`
+		statement, err := s.sqliteDB.Prepare(updateStatement)
+		if err != nil {
+			return err
+		}
+
+		_, err = statement.Exec(overlayToUpdate)
+		if err != nil {
+			return err
+		}
+
+	}
+	err = rows.Close()
+	if err != nil {
+		return err
+	}
+
+
+	// delete the neighbour info where the neighbour overlay is the disconnected peer
+	deleteStatement = `delete from NEIGHBOUR_INFO where NEIGHBOUR_OVERLAY = ?`
+	statement, err = s.sqliteDB.Prepare(deleteStatement)
+	if err != nil {
+		return err
+	}
+
+	_, err = statement.Exec(overlayToDelete)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 
 // disconnected is a registered peer registry event
 func (s *Service) disconnected(address swarm.Address) {
