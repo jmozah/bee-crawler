@@ -122,7 +122,7 @@ func (k *Kad) manage() {
 		select {
 		case <-k.quit:
 			return
-		case <-time.After(5 * time.Second):
+		case <-time.After(2 * time.Second):
 			// periodically try to connect to new peers
 			select {
 			case k.manageC <- struct{}{}:
@@ -225,7 +225,7 @@ func (k *Kad) manage() {
 
 
 			interval := time.Since(lastConnect)
-			if interval.Minutes() > 5 {
+			if interval.Minutes() > 10 {
 				k.logger.Infof("no connection for last 5 minutes. Quitting...")
 				k.quit <- struct{}{}
 			}
