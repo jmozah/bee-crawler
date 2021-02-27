@@ -107,6 +107,7 @@ func (k *Kad) manage() {
 	var (
 		peerToRemove swarm.Address
 		start        time.Time
+		lastConnect  time.Time
 	)
 
 	defer k.wg.Done()
@@ -201,6 +202,7 @@ func (k *Kad) manage() {
 				default:
 				}
 
+				lastConnect = time.Now()
 				// the bin could be saturated or not, so a decision cannot
 				// be made before checking the next peer, so we iterate to next
 				return false, false, nil
@@ -221,6 +223,12 @@ func (k *Kad) manage() {
 				k.connectBootnodes(ctx)
 			}
 
+
+			interval := time.Since(lastConnect)
+			if interval.Minutes() > 5 {
+				k.logger.Infof("no connection for last 5 minutes. Quitting...")
+				k.quit <- struct{}{}
+			}
 		}
 	}
 }
