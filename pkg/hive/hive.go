@@ -195,6 +195,10 @@ func (s *Service) addPeer(baseOverlay swarm.Address, neighbourOverlay swarm.Addr
 	po := swarm.Proximity(baseOverlay.Bytes(), neighbourOverlay.Bytes())
 	_, err = statement.Exec(baseOverlay.String(), po, neighbourOverlay.String())
 	if err != nil {
+		if strings.HasPrefix(err.Error(), "UNIQUE") {
+			s.logger.Infof("HANDLE_PEERS: inserted neighbour %s for overlay %s already, so ignoring it", neighbourOverlay.String(), baseOverlay.String())
+			return nil
+		}
 		return err
 	}
 	s.logger.Infof("HANDLE_PEERS: inserted neighbour %s for overlay %s", neighbourOverlay.String(), baseOverlay.String())
