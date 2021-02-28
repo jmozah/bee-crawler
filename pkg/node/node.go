@@ -83,6 +83,31 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 	if err != nil {
 		return nil, err
 	}
+	logger.Infof("connected to sqlite DB at %s", o.DBFile)
+
+	// trcuntae the tables PEER_INFO and NEIGHBOUR_INFO
+	deleteStatement := `delete from PEER_INFO`
+	statement, err := sqliteDB.Prepare(deleteStatement)
+	if err != nil {
+		return nil, err
+	}
+	_, err = statement.Exec()
+	if err != nil {
+		return nil, err
+	}
+	logger.Infof("truncated table PEER_INFO")
+
+	deleteStatement = `delete from NEIGHBOUR_INFO`
+	statement, err = sqliteDB.Prepare(deleteStatement)
+	if err != nil {
+		return nil, err
+	}
+	_, err = statement.Exec()
+	if err != nil {
+		return nil, err
+	}
+	logger.Infof("truncated table NEIGHBOUR_INFO")
+
 
 	p2pCtx, p2pCancel := context.WithCancel(context.Background())
 

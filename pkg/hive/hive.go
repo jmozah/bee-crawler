@@ -125,7 +125,6 @@ func (s *Service) sendPeers(ctx context.Context, peer swarm.Address, peers []swa
 }
 
 func (s *Service) peersHandler(ctx context.Context, peer p2p.Peer, stream p2p.Stream) error {
-	s.logger.Infof("getting peers list from %s",  peer.Address.String())
 	_, r := protobuf.NewWriterAndReader(stream)
 	ctx, cancel := context.WithTimeout(ctx, messageTimeout)
 	defer cancel()
@@ -141,6 +140,7 @@ func (s *Service) peersHandler(ctx context.Context, peer p2p.Peer, stream p2p.St
 	go stream.FullClose()
 
 	var peers []swarm.Address
+	var bzzPeers []*bzz.Address
 	count := 0
 	for _, newPeer := range peersReq.Peers {
 		bzzAddress, err := bzz.ParseAddress(newPeer.Underlay, newPeer.Overlay, newPeer.Signature, s.networkID)
@@ -156,9 +156,10 @@ func (s *Service) peersHandler(ctx context.Context, peer p2p.Peer, stream p2p.St
 		}
 
 		peers = append(peers, bzzAddress.Overlay)
-		s.logger.Infof("got %s from %s", swarm.NewAddress(newPeer.Overlay).String(),  peer.Address.String())
-		err = s.addPeer(peer.Address, bzzAddress.Overlay, bzzAddress.Underlay.String())
+		bzzPeers = append(bzzPeers, bzzAddress)
+		err = s.addPeer(peer.Address, bzzAddress.Overlay)
 		if err != nil {
+			s.logger.Errorf("HANDLE_PEERS: %v", err.Error())
 			continue
 		}
 		count ++
@@ -169,45 +170,90 @@ func (s *Service) peersHandler(ctx context.Context, peer p2p.Peer, stream p2p.St
 			return err
 		}
 	}
-	s.updatePeerCount(peer.Address.String(), count)
+	err := s.updatePeerCount(peer.Address.String(), count)
+	if err != nil {
+		s.logger.Errorf("HANDLE_PEERS: %v", err.Error())
+		return err
+	}
+	err = s.addNeighboursAsPeers(bzzPeers)
+	if err != nil {
+		s.logger.Errorf("HANDLE_PEERS: %v", err.Error())
+		return err
+	}
 
 	return nil
 }
 
-func (s *Service) addPeer(baseOverlay swarm.Address, neighbourOverlay swarm.Address, neighbourUnderlay string) error {
-	insertStatement := `insert into NEIGHBOUR_INFO (BASE_OVERLAY, PROXIMITY_ORDER,  NEIGHBOUR_OVERLAY, NEIGHBOUR_IP4or6, NEIGHBOUR_IP, NEIGHBOUR_PROTOCOL, NEIGHBOUR_PORT, NEIGHBOUR_UNDERLAY) values (?, ?, ?, ?, ?, ?, ?, ?)`
+func (s *Service) addPeer(baseOverlay swarm.Address, neighbourOverlay swarm.Address) error {
+	// Insert the neighbour into neighbour info table
+	insertStatement := `insert into NEIGHBOUR_INFO (BASE_OVERLAY, PROXIMITY_ORDER,  NEIGHBOUR_OVERLAY) values (?, ?, ?)`
 	statement, err := s.sqliteDB.Prepare(insertStatement)
 	if err != nil {
-		s.logger.Error(err.Error())
-		return err
-	}
-
-	cols := strings.Split(neighbourUnderlay, "/")
-	if len(cols) != 7 {
-		s.logger.Errorf("underlay split is not proper %s", neighbourUnderlay)
 		return err
 	}
 
 	po := swarm.Proximity(baseOverlay.Bytes(), neighbourOverlay.Bytes())
-
-	_, err = statement.Exec(baseOverlay.String(), po, neighbourOverlay.String(), cols[1], cols[2], cols[3], cols[4], cols[6])
+	_, err = statement.Exec(baseOverlay.String(), po, neighbourOverlay.String())
 	if err != nil {
-		s.logger.Error(err.Error())
 		return err
 	}
+	s.logger.Infof("HANDLE_PEERS: inserted neighbour %s for overlay %s", neighbourOverlay.String(), baseOverlay.String())
 	return nil
 }
 
-func (s *Service) updatePeerCount(baseOverlay string, count int) {
+func (s *Service) updatePeerCount(baseOverlay string, count int) error {
 	updateStatement := `update PEER_INFO set PEERS_COUNT = PEERS_COUNT + ? WHERE OVERLAY = ?`
 	statement, err := s.sqliteDB.Prepare(updateStatement)
 	if err != nil {
-		s.logger.Error(err.Error())
-		return
+		return err
 	}
 
 	_, err = statement.Exec(count, baseOverlay)
 	if err != nil {
-		s.logger.Error(err.Error())
+		return err
 	}
+	s.logger.Infof("HANDLE_PEERS: incremented peer count of %s by another %d", baseOverlay, count)
+	return nil
+}
+
+func (s *Service) addNeighboursAsPeers(bzzPeers []*bzz.Address) error {
+	for _, bzzPeer := range bzzPeers {
+		rows, err := s.sqliteDB.Query("select OVERLAY from PEER_INFO WHERE OVERLAY = '%s' \n", bzzPeer.Overlay.String())
+		if err != nil {
+			return err
+		}
+		overlayPresent := ""
+		for rows.Next() {
+			err := rows.Scan(&overlayPresent)
+			if err != nil {
+				return err
+			}
+		}
+		if overlayPresent == "" {
+			insertStatement := `insert into PEER_INFO (OVERLAY, IP4or6, IP, PROTOCOL, PORT, UNDERLAY, PEERS_COUNT) values (?, ?, ?, ?, ?, ?, ?)`
+			statement, err := s.sqliteDB.Prepare(insertStatement)
+			if err != nil {
+				return err
+			}
+
+			peers_count := -1
+			overlay := bzzPeer.Overlay.String()
+			underlay := bzzPeer.Underlay.String()
+			cols := strings.Split(underlay, "/")
+			if len(cols) != 7 {
+				return fmt.Errorf("invalid underlay format %s", underlay)
+			}
+
+			_, err = statement.Exec(overlay, cols[1], cols[2], cols[3], cols[4], cols[6], peers_count)
+			if err != nil {
+				if strings.HasPrefix(err.Error(), "UNIQUE") {
+					s.logger.Infof("HANDLE_PEERS: peer %s already got added in PEER_INFO, so ignoring it", overlay)
+					return nil
+				}
+				return err
+			}
+			s.logger.Infof("HANDLE_PEERS: adding neighbour %s as new harvested peer since it is not present in PEER_INFO", overlay)
+		}
+	}
+	return nil
 }

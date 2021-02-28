@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -514,29 +515,83 @@ func (s *Service) Connect(ctx context.Context, addr ma.Multiaddr) (address *bzz.
 
 	s.protocolsmu.RUnlock()
 
-	s.addPeerToDB(i.BzzAddress)
+	err = s.addPeerToDB(i.BzzAddress)
+	if err != nil {
+		s.logger.Errorf("CONNECT: %w", err.Error())
+		return nil, err
+	}
 	s.metrics.CreatedConnectionCount.Inc()
 	s.logger.Debugf("successfully connected to peer %s (outbound)", i.BzzAddress.ShortString())
 	s.logger.Infof("successfully connected to peer %s (outbound)", i.BzzAddress.Overlay)
 	return i.BzzAddress, nil
 }
 
-func (s *Service) addPeerToDB(bzzAddress *bzz.Address)  {
-	// insert the connected peer in to DB
-	insertStatement := `insert into PEER_INFO (OVERLAY, UNDERLAY, PEERS_COUNT) values (?, ?, ?)`
-	statement, err := s.sqliteDB.Prepare(insertStatement)
+func (s *Service) addPeerToDB(bzzAddress *bzz.Address)  error {
+	// check if the overlay is already present in PEER_INFO
+	rows, err := s.sqliteDB.Query("select OVERLAY from PEER_INFO WHERE OVERLAY = '%s' \n", bzzAddress.Overlay.String())
 	if err != nil {
-		s.logger.Error(err.Error())
-		return
+		return err
 	}
+	overlayPresent := ""
+	for rows.Next() {
+		err := rows.Scan(&overlayPresent)
+		if err != nil {
+			return err
+		}
+	}
+	if overlayPresent == "" {
+		// it is not present, so insert the connected peer in to DB
+		insertStatement := `insert into PEER_INFO (OVERLAY, IP4or6, IP, PROTOCOL, PORT, UNDERLAY, PEERS_COUNT) values (?, ?, ?,?, ?, ?, ?)`
+		statement, err := s.sqliteDB.Prepare(insertStatement)
+		if err != nil {
+			return err
+		}
 
-	peers_count := 0
-	overlay := bzzAddress.Overlay.String()
-	underlay := bzzAddress.Underlay.String()
-	_, err = statement.Exec(overlay, underlay, peers_count)
-	if err != nil {
-		s.logger.Error(err.Error())
+		peers_count := 0
+		overlay := bzzAddress.Overlay.String()
+		underlay := bzzAddress.Underlay.String()
+		cols := strings.Split(underlay, "/")
+		if len(cols) != 7 {
+			return fmt.Errorf("invalid underlay format %s", underlay)
+		}
+
+		_, err = statement.Exec(overlay, cols[1], cols[2], cols[3], cols[4], cols[6], peers_count)
+		if err != nil {
+			if strings.HasPrefix(err.Error(), "UNIQUE") {
+				// Someone has inserted the PEER before we can insert... so just make it as connected
+				updateStatement := `update PEER_INFO set PEERS_COUNT = 0 WHERE OVERLAY = ?`
+				statement, err := s.sqliteDB.Prepare(updateStatement)
+				if err != nil {
+					return err
+				}
+
+				_, err = statement.Exec(overlay)
+				if err != nil {
+					return err
+				}
+				s.logger.Infof("CONNECT: peer %s already present in PEER_INFO, so marking as connected", overlay)
+				return nil
+			} else {
+				return err
+			}
+		}
+		s.logger.Infof("CONNECT: inserted %s in to PEER_INFO", overlay)
+	} else {
+		// it is present, just update the peer count to 0
+		updateStatement := `update PEER_INFO set PEERS_COUNT = 0 WHERE OVERLAY = ?`
+		statement, err := s.sqliteDB.Prepare(updateStatement)
+		if err != nil {
+			return err
+		}
+
+		overlay := bzzAddress.Overlay.String()
+		_, err = statement.Exec(overlay)
+		if err != nil {
+			return err
+		}
+		s.logger.Infof("CONNECT: making %s as connected in peer info", overlay)
 	}
+	return nil
 }
 
 func (s *Service) Disconnect(overlay swarm.Address) error {
@@ -566,7 +621,7 @@ func (s *Service) Disconnect(overlay swarm.Address) error {
 
 	err := s.removePeerFromDB(overlay)
 	if err != nil{
-		s.logger.Error(err.Error())
+		s.logger.Errorf("DISCONNECT: %w", err.Error())
 		return err
 	}
 
@@ -575,7 +630,6 @@ func (s *Service) Disconnect(overlay swarm.Address) error {
 
 func (s *Service) removePeerFromDB(overlayToDelete swarm.Address)  error {
 	// deleet from peer_info connection table to indicate tht this is disconnected
-	s.logger.Infof("deleting the record from PEER_INFO for %s", overlayToDelete)
 	deleteStatement := `delete from PEER_INFO where OVERLAY = ?`
 	statement, err := s.sqliteDB.Prepare(deleteStatement)
 	if err != nil {
@@ -586,9 +640,9 @@ func (s *Service) removePeerFromDB(overlayToDelete swarm.Address)  error {
 	if err != nil {
 		return err
 	}
+	s.logger.Infof("DISCONNECT: deleted %s from PEER_INFO", overlayToDelete)
 
 	// delete the neighbour info of the base overlay
-	s.logger.Infof("deleting all records where  BASE_OVERLAY = %s", overlayToDelete)
 	deleteStatement = `delete from NEIGHBOUR_INFO where BASE_OVERLAY = ?`
 	statement, err = s.sqliteDB.Prepare(deleteStatement)
 	if err != nil {
@@ -599,6 +653,7 @@ func (s *Service) removePeerFromDB(overlayToDelete swarm.Address)  error {
 	if err != nil {
 		return err
 	}
+	s.logger.Infof("DISCONNECT: deleted all records where  BASE_OVERLAY = %s", overlayToDelete)
 
 
 	// select all the rows where neighbour overlay is the disconnected overlay and rmove them
@@ -622,7 +677,7 @@ func (s *Service) removePeerFromDB(overlayToDelete swarm.Address)  error {
 		if err != nil {
 			return err
 		}
-		s.logger.Infof("reducing peer count of %s", overlayToUpdate)
+		s.logger.Infof("DISCONNECT: reducing peer count of %s as it neighbour %s got disconnected", overlayToUpdate, overlayToDelete)
 
 	}
 	err = rows.Close()
@@ -632,7 +687,6 @@ func (s *Service) removePeerFromDB(overlayToDelete swarm.Address)  error {
 
 
 	// delete the neighbour info where the neighbour overlay is the disconnected peer
-	s.logger.Infof("deleting all records where  NEIGHBOUR_OVERLAY = %s", overlayToDelete)
 	deleteStatement = `delete from NEIGHBOUR_INFO where NEIGHBOUR_OVERLAY = ?`
 	statement, err = s.sqliteDB.Prepare(deleteStatement)
 	if err != nil {
@@ -643,6 +697,7 @@ func (s *Service) removePeerFromDB(overlayToDelete swarm.Address)  error {
 	if err != nil {
 		return err
 	}
+	s.logger.Infof("DISCONNECT: deleting all records where  NEIGHBOUR_OVERLAY = %s", overlayToDelete)
 	return nil
 }
 
