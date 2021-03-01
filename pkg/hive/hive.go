@@ -98,7 +98,7 @@ func (s *Service) sendPeers(ctx context.Context, peer swarm.Address, peers []swa
 			_ = stream.FullClose()
 		}
 	}()
-	w, _ := protobuf.NewWriterAndReader(stream)
+	//w, _ := protobuf.NewWriterAndReader(stream)
 	var peersRequest pb.Peers
 	for _, p := range peers {
 		addr, err := s.addressBook.Get(p)
@@ -117,9 +117,9 @@ func (s *Service) sendPeers(ctx context.Context, peer swarm.Address, peers []swa
 		})
 	}
 
-	if err := w.WriteMsgWithContext(ctx, &peersRequest); err != nil {
-		return fmt.Errorf("write Peers message: %w", err)
-	}
+	//if err := w.WriteMsgWithContext(ctx, &peersRequest); err != nil {
+	//	return fmt.Errorf("write Peers message: %w", err)
+	//}
 
 	return nil
 }
