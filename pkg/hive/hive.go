@@ -191,6 +191,7 @@ func (s *Service) addPeer(baseOverlay swarm.Address, neighbourOverlay swarm.Addr
 	if err != nil {
 		return err
 	}
+	defer statement.Close()
 
 	po := swarm.Proximity(baseOverlay.Bytes(), neighbourOverlay.Bytes())
 	_, err = statement.Exec(baseOverlay.String(), po, neighbourOverlay.String())
@@ -211,6 +212,7 @@ func (s *Service) updatePeerCount(baseOverlay string, count int) error {
 	if err != nil {
 		return err
 	}
+	defer statement.Close()
 
 	_, err = statement.Exec(count, baseOverlay)
 	if err != nil {
@@ -226,6 +228,8 @@ func (s *Service) addNeighboursAsPeers(bzzPeers []*bzz.Address) error {
 		if err != nil {
 			return err
 		}
+		defer rows.Close()
+
 		overlayPresent := ""
 		for rows.Next() {
 			err := rows.Scan(&overlayPresent)
@@ -239,6 +243,7 @@ func (s *Service) addNeighboursAsPeers(bzzPeers []*bzz.Address) error {
 			if err != nil {
 				return err
 			}
+			defer statement.Close()
 
 			peers_count := -1
 			overlay := bzzPeer.Overlay.String()
