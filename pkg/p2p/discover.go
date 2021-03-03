@@ -15,6 +15,7 @@ import (
 )
 
 func Discover(ctx context.Context, addr ma.Multiaddr, f func(ma.Multiaddr) (bool, error)) (bool, error) {
+	fmt.Println(addr.String())
 	if comp, _ := ma.SplitFirst(addr); comp.Protocol().Name != "dnsaddr" {
 		return f(addr)
 	}

@@ -309,6 +309,11 @@ func New(ctx context.Context, signer beecrypto.Signer, networkID uint64, overlay
 			}
 		}
 
+		err = s.addPeerToDB(i.BzzAddress, "inbound")
+		if err != nil {
+			s.logger.Errorf("CONNECT: %w (inbound)", err.Error())
+		}
+
 		s.metrics.HandledStreamCount.Inc()
 		s.logger.Debugf("successfully connected to peer %s (inbound)", i.BzzAddress.ShortString())
 		s.logger.Infof("successfully connected to peer %s (inbound)", i.BzzAddress.Overlay)
@@ -515,9 +520,9 @@ func (s *Service) Connect(ctx context.Context, addr ma.Multiaddr) (address *bzz.
 
 	s.protocolsmu.RUnlock()
 
-	err = s.addPeerToDB(i.BzzAddress)
+	err = s.addPeerToDB(i.BzzAddress, "outbound)")
 	if err != nil {
-		s.logger.Errorf("CONNECT: %w", err.Error())
+		s.logger.Errorf("CONNECT: %w (outbound)", err.Error())
 		return nil, err
 	}
 	s.metrics.CreatedConnectionCount.Inc()
@@ -526,7 +531,7 @@ func (s *Service) Connect(ctx context.Context, addr ma.Multiaddr) (address *bzz.
 	return i.BzzAddress, nil
 }
 
-func (s *Service) addPeerToDB(bzzAddress *bzz.Address)  error {
+func (s *Service) addPeerToDB(bzzAddress *bzz.Address, bound string)  error {
 	// check if the overlay is already present in PEER_INFO
 	rows, err := s.sqliteDB.Query("select OVERLAY from PEER_INFO WHERE OVERLAY = '%s' \n", bzzAddress.Overlay.String())
 	if err != nil {
@@ -552,32 +557,51 @@ func (s *Service) addPeerToDB(bzzAddress *bzz.Address)  error {
 		overlay := bzzAddress.Overlay.String()
 		underlay := bzzAddress.Underlay.String()
 		cols := strings.Split(underlay, "/")
-		if len(cols) != 7 {
-			return fmt.Errorf("invalid underlay format %s", underlay)
+		if len(cols) != 7  && len(cols) != 6 {
+			return fmt.Errorf("invalid underlay format %s (%s)", underlay, bound)
 		}
 
-		_, err = statement.Exec(overlay, cols[1], cols[2], cols[3], cols[4], cols[6], peers_count)
-		if err != nil {
-			if strings.HasPrefix(err.Error(), "UNIQUE") {
-				// Someone has inserted the PEER before we can insert... so just make it as connected
-				updateStatement := `update PEER_INFO set PEERS_COUNT = 0 WHERE OVERLAY = ?`
-				statement1, err := s.sqliteDB.Prepare(updateStatement)
-				if err != nil {
-					return err
-				}
-				defer statement1.Close()
-
-				_, err = statement1.Exec(overlay)
-				if err != nil {
-					return err
-				}
-				s.logger.Infof("CONNECT: peer %s already present in PEER_INFO, so marking as connected", overlay)
-				return nil
-			} else {
+		var addresses []ma.Multiaddr
+		if len(cols) == 6 && cols[1] == "dns4" {
+			if _, err := p2p.Discover(context.Background(), bzzAddress.Underlay, func(addr ma.Multiaddr) (stop bool, err error) {
+				addresses = append(addresses, addr)
+				s.logger.Infof("resolved %s in to %s", underlay, addr.String())
+				return true, nil
+			});err != nil {
 				return err
 			}
+		} else {
+			addresses = append(addresses,  bzzAddress.Underlay)
 		}
-		s.logger.Infof("CONNECT: inserted %s in to PEER_INFO", overlay)
+
+		for _, addr :=range addresses {
+			cols1 := strings.Split(addr.String(), "/")
+			if len(cols1) != 7 {
+				return fmt.Errorf("invalid underlay format %s (%s)", underlay, bound)
+			}
+			_, err = statement.Exec(overlay, cols1[1], cols1[2], cols1[3], cols1[4], cols1[6], peers_count)
+			if err != nil {
+				if strings.HasPrefix(err.Error(), "UNIQUE") {
+					// Someone has inserted the PEER before we can insert... so just make it as connected
+					updateStatement := `update PEER_INFO set PEERS_COUNT = 0 WHERE OVERLAY = ?`
+					statement1, err := s.sqliteDB.Prepare(updateStatement)
+					if err != nil {
+						return err
+					}
+					defer statement1.Close()
+
+					_, err = statement1.Exec(overlay)
+					if err != nil {
+						return err
+					}
+					s.logger.Infof("CONNECT: peer %s already present in PEER_INFO, so marking as connected (%s)", overlay, bound)
+					return nil
+				} else {
+					return err
+				}
+			}
+		}
+		s.logger.Infof("CONNECT: inserted %s in to PEER_INFO (%s)", overlay, bound)
 	} else {
 		// it is present, just update the peer count to 0
 		updateStatement := `update PEER_INFO set PEERS_COUNT = 0 WHERE OVERLAY = ?`
@@ -592,7 +616,7 @@ func (s *Service) addPeerToDB(bzzAddress *bzz.Address)  error {
 		if err != nil {
 			return err
 		}
-		s.logger.Infof("CONNECT: making %s as connected in peer info", overlay)
+		s.logger.Infof("CONNECT: making %s as connected in peer info (%s)", overlay, bound)
 	}
 	return nil
 }

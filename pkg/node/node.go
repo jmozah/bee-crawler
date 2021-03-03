@@ -174,6 +174,7 @@ func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, 
 				continue
 			}
 
+			fmt.Println(addr.String())
 			bootnodes = append(bootnodes, addr)
 		}
 	}
