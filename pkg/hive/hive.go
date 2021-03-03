@@ -202,7 +202,7 @@ func (s *Service) addPeer(baseOverlay swarm.Address, neighbourOverlay swarm.Addr
 		}
 		return err
 	}
-	s.logger.Debugf("HANDLE_PEERS: inserted neighbour %s for overlay %s", neighbourOverlay.String(), baseOverlay.String())
+	s.logger.Infof("HANDLE_PEERS: inserted neighbour %s for overlay %s", neighbourOverlay.String(), baseOverlay.String())
 	return nil
 }
 
