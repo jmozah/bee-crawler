@@ -197,12 +197,12 @@ func (s *Service) addPeer(baseOverlay swarm.Address, neighbourOverlay swarm.Addr
 	_, err = statement.Exec(baseOverlay.String(), po, neighbourOverlay.String())
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "UNIQUE") {
-			s.logger.Infof("HANDLE_PEERS: inserted neighbour %s for overlay %s already, so ignoring it", neighbourOverlay.String(), baseOverlay.String())
+			s.logger.Errorf("HANDLE_PEERS: inserted neighbour %s for overlay %s already, so ignoring it", neighbourOverlay.String(), baseOverlay.String())
 			return nil
 		}
 		return err
 	}
-	s.logger.Infof("HANDLE_PEERS: inserted neighbour %s for overlay %s", neighbourOverlay.String(), baseOverlay.String())
+	s.logger.Debugf("HANDLE_PEERS: inserted neighbour %s for overlay %s", neighbourOverlay.String(), baseOverlay.String())
 	return nil
 }
 
@@ -218,7 +218,7 @@ func (s *Service) updatePeerCount(baseOverlay string, count int) error {
 	if err != nil {
 		return err
 	}
-	s.logger.Infof("HANDLE_PEERS: incremented peer count of %s by another %d", baseOverlay, count)
+	s.logger.Debugf("HANDLE_PEERS: incremented peer count of %s by another %d", baseOverlay, count)
 	return nil
 }
 
@@ -256,12 +256,12 @@ func (s *Service) addNeighboursAsPeers(bzzPeers []*bzz.Address) error {
 			_, err = statement.Exec(overlay, cols[1], cols[2], cols[3], cols[4], cols[6], peers_count)
 			if err != nil {
 				if strings.HasPrefix(err.Error(), "UNIQUE") {
-					s.logger.Infof("HANDLE_PEERS: peer %s already got added in PEER_INFO, so ignoring it", overlay)
+					s.logger.Debugf("HANDLE_PEERS: peer %s already got added in PEER_INFO, so ignoring it", overlay)
 					return nil
 				}
 				return err
 			}
-			s.logger.Infof("HANDLE_PEERS: adding neighbour %s as new harvested peer since it is not present in PEER_INFO", overlay)
+			s.logger.Debugf("HANDLE_PEERS: adding neighbour %s as new harvested peer since it is not present in PEER_INFO", overlay)
 		}
 	}
 	return nil
