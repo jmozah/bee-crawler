@@ -648,7 +648,7 @@ func (s *Service) Disconnect(overlay swarm.Address) error {
 
 	err := s.removePeerFromDB(overlay)
 	if err != nil{
-		s.logger.Errorf("DISCONNECT: %w", err.Error())
+		s.logger.Errorf("DISCONNECT: %v", err.Error())
 		return err
 	}
 
