@@ -537,6 +537,7 @@ func (s *Service) addPeerToDB(bzzAddress *bzz.Address, bound string)  error {
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	overlayPresent := ""
 	for rows.Next() {
 		err := rows.Scan(&overlayPresent)
@@ -544,6 +545,7 @@ func (s *Service) addPeerToDB(bzzAddress *bzz.Address, bound string)  error {
 			return err
 		}
 	}
+
 	if overlayPresent == "" {
 		// it is not present, so insert the connected peer in to DB
 		insertStatement := `insert into PEER_INFO (OVERLAY, IP4or6, IP, PROTOCOL, PORT, UNDERLAY, PEERS_COUNT) values (?, ?, ?,?, ?, ?, ?)`
@@ -574,7 +576,7 @@ func (s *Service) addPeerToDB(bzzAddress *bzz.Address, bound string)  error {
 			addresses = append(addresses,  bzzAddress.Underlay)
 		}
 
-		for _, addr :=range addresses {
+		for _, addr := range addresses {
 			cols1 := strings.Split(addr.String(), "/")
 			if len(cols1) != 7 {
 				return fmt.Errorf("invalid underlay format %s (%s)", underlay, bound)
@@ -690,6 +692,7 @@ func (s *Service) removePeerFromDB(overlayToDelete swarm.Address)  error {
 	if err != nil {
 		return err
 	}
+	defer rows.Close()
 	for rows.Next() {
 		overlayToUpdate := ""
 		err := rows.Scan(&overlayToUpdate)

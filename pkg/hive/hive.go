@@ -14,6 +14,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	ma "github.com/multiformats/go-multiaddr"
 	"strings"
 	"time"
 
@@ -249,17 +250,36 @@ func (s *Service) addNeighboursAsPeers(bzzPeers []*bzz.Address) error {
 			overlay := bzzPeer.Overlay.String()
 			underlay := bzzPeer.Underlay.String()
 			cols := strings.Split(underlay, "/")
-			if len(cols) != 7 {
+			if len(cols) != 7 && len(cols) != 6  {
 				return fmt.Errorf("invalid underlay format %s", underlay)
 			}
 
-			_, err = statement.Exec(overlay, cols[1], cols[2], cols[3], cols[4], cols[6], peers_count)
-			if err != nil {
-				if strings.HasPrefix(err.Error(), "UNIQUE") {
-					s.logger.Debugf("HANDLE_PEERS: peer %s already got added in PEER_INFO, so ignoring it", overlay)
-					return nil
+			var addresses []ma.Multiaddr
+			if len(cols) == 6 && cols[1] == "dns4" {
+				if _, err := p2p.Discover(context.Background(), bzzPeer.Underlay, func(addr ma.Multiaddr) (stop bool, err error) {
+					addresses = append(addresses, addr)
+					s.logger.Infof("resolved %s in to %s", underlay, addr.String())
+					return true, nil
+				});err != nil {
+					return err
 				}
-				return err
+			} else {
+				addresses = append(addresses,  bzzPeer.Underlay)
+			}
+
+			for _, addr := range addresses {
+				cols1 := strings.Split(addr.String(), "/")
+				if len(cols1) != 7 {
+					return fmt.Errorf("invalid underlay format %s ", underlay)
+				}
+				_, err = statement.Exec(overlay, cols1[1], cols1[2], cols1[3], cols1[4], cols1[6], peers_count)
+				if err != nil {
+					if strings.HasPrefix(err.Error(), "UNIQUE") {
+						s.logger.Debugf("HANDLE_PEERS: peer %s already got added in PEER_INFO, so ignoring it", overlay)
+						return nil
+					}
+					return err
+				}
 			}
 			s.logger.Debugf("HANDLE_PEERS: adding neighbour %s as new harvested peer since it is not present in PEER_INFO", overlay)
 		}
