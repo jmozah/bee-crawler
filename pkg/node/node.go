@@ -79,10 +79,13 @@ type Options struct {
 }
 
 func NewBee(addr string, swarmAddress swarm.Address, publicKey ecdsa.PublicKey, signer crypto.Signer, networkID uint64, logger logging.Logger, libp2pPrivateKey, pssPrivateKey *ecdsa.PrivateKey, o Options) (*Bee, error) {
-	sqliteDB, err := sql.Open("sqlite3", o.DBFile)
+	fileStr := fmt.Sprintf("%s?cache=shared&mode=rwc", o.DBFile)
+	sqliteDB, err := sql.Open("sqlite3", fileStr)
 	if err != nil {
 		return nil, err
 	}
+	sqliteDB.SetMaxOpenConns(1)
+	sqliteDB.SetConnMaxLifetime(0)
 	logger.Infof("connected to sqlite DB at %s", o.DBFile)
 
 	// trcuntae the tables PEER_INFO and NEIGHBOUR_INFO
