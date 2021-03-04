@@ -677,7 +677,7 @@ func (s *Service) removePeerFromDB(overlayToDelete swarm.Address)  error {
 
 
 	// select all the rows where neighbour overlay is the disconnected overlay and rmove them
-	rows, err := s.sqliteDB.Query("select BASE_OVERLAY from NEIGHBOUR_INFO WHERE NEIGHBOUR_OVERLAY = '%s' \n", overlayToDelete)
+	rows, err := s.sqliteDB.Query("select BASE_OVERLAY from NEIGHBOUR_INFO WHERE NEIGHBOUR_OVERLAY = '%s' \n", overlayToDelete.String())
 	if err != nil {
 		return err
 	}
