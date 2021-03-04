@@ -6,6 +6,7 @@ package kademlia
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -67,6 +68,7 @@ type Kad struct {
 	quit           chan struct{} // quit channel
 	done           chan struct{} // signal that `manage` has quit
 	wg             sync.WaitGroup
+	sqliteDB       *sql.DB
 }
 
 type retryInfo struct {
@@ -75,7 +77,7 @@ type retryInfo struct {
 }
 
 // New returns a new Kademlia.
-func New(base swarm.Address, addressbook addressbook.Interface, discovery discovery.Driver, p2p p2p.Service, logger logging.Logger, o Options) *Kad {
+func New(base swarm.Address, addressbook addressbook.Interface, discovery discovery.Driver, p2p p2p.Service, sqliteDB *sql.DB, logger logging.Logger, o Options) *Kad {
 	if o.SaturationFunc == nil {
 		o.SaturationFunc = binSaturated
 	}
@@ -96,6 +98,7 @@ func New(base swarm.Address, addressbook addressbook.Interface, discovery discov
 		quit:           make(chan struct{}),
 		done:           make(chan struct{}),
 		wg:             sync.WaitGroup{},
+		sqliteDB:       sqliteDB,
 	}
 
 	return k
@@ -364,6 +367,17 @@ func (k *Kad) connect(ctx context.Context, peer swarm.Address, ma ma.Multiaddr, 
 			}
 
 			failedAttempts++
+			updateStatement := `update PEER_INFO set PEERS_COUNT = PEERS_COUNT - 1 WHERE OVERLAY = ?`
+			statement1, err := k.sqliteDB.Prepare(updateStatement)
+			if err != nil {
+				return err
+			}
+			defer statement1.Close()
+			_, err = statement1.Exec(peer.String())
+			if err != nil {
+				return err
+			}
+			k.logger.Infof("CONNECT: could not reach peer %s attempt %d", peer, failedAttempts)
 		}
 
 		if failedAttempts > maxConnAttempts {

@@ -166,6 +166,8 @@ func (s *Service) peersHandler(ctx context.Context, peer p2p.Peer, stream p2p.St
 		count ++
 	}
 
+
+
 	if s.addPeersHandler != nil {
 		if err := s.addPeersHandler(ctx, peers...); err != nil {
 			return err

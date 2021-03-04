@@ -658,33 +658,22 @@ func (s *Service) Disconnect(overlay swarm.Address) error {
 }
 
 func (s *Service) removePeerFromDB(overlayToDelete swarm.Address)  error {
-	// deleet from peer_info connection table to indicate tht this is disconnected
-	deleteStatement := `delete from PEER_INFO where OVERLAY = ?`
-	statement, err := s.sqliteDB.Prepare(deleteStatement)
-	if err != nil {
-		return err
-	}
-	defer statement.Close()
 
-	_, err = statement.Exec(overlayToDelete)
-	if err != nil {
-		return err
-	}
-	s.logger.Infof("DISCONNECT: deleted %s from PEER_INFO", overlayToDelete)
+	// Leave the peer intact in PEER_INFO so that we know that this peer is disconnected
 
 	// delete the neighbour info of the base overlay
-	deleteStatement = `delete from NEIGHBOUR_INFO where BASE_OVERLAY = ?`
+	deleteStatement := `delete from NEIGHBOUR_INFO where BASE_OVERLAY = ?`
 	statement1, err := s.sqliteDB.Prepare(deleteStatement)
 	if err != nil {
 		return err
 	}
 	defer statement1.Close()
 
-	_, err = statement1.Exec(overlayToDelete)
+	_, err = statement1.Exec(overlayToDelete.String())
 	if err != nil {
 		return err
 	}
-	s.logger.Infof("DISCONNECT: deleted all records where  BASE_OVERLAY = %s", overlayToDelete)
+	s.logger.Infof("DISCONNECT: deleted all records where  BASE_OVERLAY = %s", overlayToDelete.String())
 
 
 	// select all the rows where neighbour overlay is the disconnected overlay and rmove them
@@ -710,7 +699,7 @@ func (s *Service) removePeerFromDB(overlayToDelete swarm.Address)  error {
 		if err != nil {
 			return err
 		}
-		s.logger.Infof("DISCONNECT: reducing peer count of %s as it neighbour %s got disconnected", overlayToUpdate, overlayToDelete)
+		s.logger.Infof("DISCONNECT: reducing peer count of %s as it neighbour %s got disconnected", overlayToUpdate, overlayToDelete.String())
 
 	}
 	err = rows.Close()
@@ -727,11 +716,11 @@ func (s *Service) removePeerFromDB(overlayToDelete swarm.Address)  error {
 	}
 	defer statement3.Close()
 
-	_, err = statement3.Exec(overlayToDelete)
+	_, err = statement3.Exec(overlayToDelete.String())
 	if err != nil {
 		return err
 	}
-	s.logger.Infof("DISCONNECT: deleting all records where  NEIGHBOUR_OVERLAY = %s", overlayToDelete)
+	s.logger.Infof("DISCONNECT: deleting all records where  NEIGHBOUR_OVERLAY = %s", overlayToDelete.String())
 	return nil
 }
 
